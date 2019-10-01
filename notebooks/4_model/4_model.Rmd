@@ -33,7 +33,7 @@ titanic_val <- bake(rec, new_data = titanic_val)
 titanic_test <- bake(rec, new_data = titanic_test)
 ```
 
-## Model spesification
+## Model specification
 
 ```{r}
 param_grid <- grid_random(
