@@ -1,0 +1,71 @@
+---
+title: "Import"
+author: "Matthew Edwards"
+date: "30/09/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(here)
+```
+
+## Check data
+
+```{r}
+data_path <- here("data", "titanic.csv")
+```
+
+```{r}
+read_lines(data_path, n_max = 4)
+```
+
+## Read data
+
+```{r}
+column_names <- c(
+  "ticket_class",
+  "survived",
+  "name",
+  "gender",
+  "age",
+  "sibling_spouse",
+  "parent_child",
+  "ticket_number",
+  "ticket_fare",
+  "cabin_number",
+  "port_embarked"
+)
+```
+
+```{r}
+column_types <- cols(
+  ticket_class = col_double(),
+  survived = col_double(),
+  name = col_character(),
+  gender = col_character(),
+  age = col_double(),
+  sibling_spouse = col_double(),
+  parent_child = col_double(),
+  ticket_number = col_character(),
+  ticket_fare = col_double(),
+  cabin_number = col_character(),
+  port_embarked = col_character()
+)
+```
+
+```{r}
+titanic <- read_csv(data_path,
+  col_names = column_names,
+  col_types = column_types,
+  na = c("", "NA"),
+  skip = 1
+)
+```
+
+## Write data
+
+```{r}
+write_rds(titanic, path = here("data", "titanic_raw.rds"))
+```

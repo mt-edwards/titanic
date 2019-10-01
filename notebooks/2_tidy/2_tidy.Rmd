@@ -1,0 +1,77 @@
+---
+title: "Tidy"
+author: "Matthew Edwards"
+date: "30/09/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(tidymodels)
+library(here)
+```
+
+## Read data
+
+```{r}
+titanic <- read_rds(here("data", "titanic_raw.rds"))
+```
+
+## Tidy features
+
+```{r}
+titanic <- titanic %>%
+  mutate(
+    ticket_class = factor(ticket_class, labels = c("1st", "2nd", "3rd")),
+    survived = factor(survived, labels = c("No", "Yes")),
+    gender = factor(gender, labels = c("Female", "Male")),
+    port_embarked = factor(port_embarked, labels = c("Cherbourg", "Queenstown", "Southampton"))
+  )
+```
+
+## Generate features
+
+```{r}
+features <- c(
+  "ticket_class",
+  "survived",
+  "title",
+  "gender",
+  "age",
+  "family_size",
+  "ticket_fare",
+  "deck",
+  "port_embarked"
+)
+```
+
+```{r}
+titanic_tidy <- titanic %>%
+  mutate(
+    title = factor(str_extract(name, pattern = "[:alpha:]*\\.")),
+    deck = fct_explicit_na(factor(str_extract(cabin_number, pattern = "[:upper:]"))),
+    family_size = sibling_spouse + parent_child,
+    port_embarked = fct_explicit_na(port_embarked)
+  ) %>%
+  select(features) %>% 
+  drop_na()
+```
+
+## Split data
+
+```{r}
+split_one <- initial_split(titanic_tidy, prop = 4 / 5, strata = "survived")
+split_two <- initial_split(training(split_one), prop = 4 / 5, strata = "survived")
+titanic_test <- testing(split_one)
+titanic_val <- testing(split_two)
+titanic_train <- training(split_two)
+```
+
+## Write data
+
+```{r}
+write_rds(titanic_train, path = here("data", "titanic_train.rds"))
+write_rds(titanic_val, path = here("data", "titanic_val.rds"))
+write_rds(titanic_test, path = here("data", "titanic_test.rds"))
+```

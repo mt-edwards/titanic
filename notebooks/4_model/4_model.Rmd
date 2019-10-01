@@ -1,0 +1,73 @@
+---
+title: "Model"
+author: "Matthew Edwards"
+date: "30/09/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(tidymodels)
+library(here)
+```
+
+## Read data
+
+```{r}
+titanic_train <- read_rds(here("data", "titanic_train.rds"))
+titanic_val <- read_rds(here("data", "titanic_val.rds"))
+titanic_test <- read_rds(here("data", "titanic_test.rds"))
+```
+
+## Preprocess data
+
+```{r}
+rec <- titanic_train %>%
+  recipe(survived ~ .) %>%
+  step_other(title, deck) %>% 
+  prep(training = titanic_train)
+
+titanic_train <- bake(rec, new_data = titanic_train)
+titanic_val <- bake(rec, new_data = titanic_val)
+titanic_test <- bake(rec, new_data = titanic_test)
+```
+
+## Model spesification
+
+```{r}
+param_grid <- grid_random(
+  mtry %>% range_set(c(1,  5)),
+  trees %>% range_set(c(500, 1000)), 
+  min_n %>% range_set(c(2,  10)),
+  size = 100
+)
+
+models <- rand_forest(mode = "classification") %>%
+  set_engine("ranger") %>% 
+  merge(param_grid)
+```
+
+## Model fitting
+
+```{r}
+fits <- map(models, fit, formula = survived ~ ., data = titanic_train)
+```
+
+# Model validation
+
+```{r}
+f_measures <- map(fits, predict, new_data = titanic_val) %>% 
+  map(bind_cols, titanic_val) %>% 
+  map_dfr(f_meas, truth = survived, estimate = .pred_class) %>% 
+  transmute(id = row_number(), f_measure = .estimate) %>% 
+  arrange(desc(f_measure))
+```
+
+## Testing
+
+```{r}
+predict(nth(fits, 2), new_data = titanic_test) %>%
+  bind_cols(titanic_test) %>%
+  metric_set(accuracy, f_meas)(truth = survived, estimate = .pred_class)
+```
