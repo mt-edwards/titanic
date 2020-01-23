@@ -1,0 +1,281 @@
+Predicting Titanic Survival
+========================================================
+author: Matthew Edwards
+date: 23rd January 2020
+autosize: true
+
+<small> 
+Data Scientist   
+National Innovation Centre for Data   
+</small>
+
+```{r setup, include=FALSE}
+opts_chunk$set(cache=TRUE)
+
+library(here)
+library(tidyverse)
+library(tidymodels)
+library(skimr)
+library(tune)
+library(ranger)
+```
+
+Import - Check Data
+========================================================
+
+```{r}
+data_path <- here("data", "titanic.csv")
+read_lines(data_path, n_max = 4)
+```
+
+Import - Read Data
+========================================================
+
+```{r}
+column_names <- c(
+  "ticket_class",
+  "survived",
+  "name",
+  "gender",
+  "age",
+  "sibling_spouse",
+  "parent_child",
+  "ticket_number",
+  "ticket_fare",
+  "cabin_number",
+  "port_embarked"
+)
+```
+
+```{r}
+column_types <- cols(
+  ticket_class = col_double(),
+  survived = col_double(),
+  name = col_character(),
+  gender = col_character(),
+  age = col_double(),
+  sibling_spouse = col_double(),
+  parent_child = col_double(),
+  ticket_number = col_character(),
+  ticket_fare = col_double(),
+  cabin_number = col_character(),
+  port_embarked = col_character()
+)
+```
+
+```{r}
+titanic <- read_csv(data_path,
+  col_names = column_names,
+  col_types = column_types,
+  na = c("", "NA"),
+  skip = 1
+)
+```
+
+Import - Write Data
+========================================================
+
+```{r}
+write_rds(titanic, path = here("data", "titanic_raw.rds"))
+```
+
+Tidy - Read Data
+========================================================
+
+```{r}
+titanic <- read_rds(here("data", "titanic_raw.rds"))
+```
+
+Tidy - Format Features
+========================================================
+
+```{r}
+titanic <- titanic %>%
+  mutate(
+    ticket_class = factor(ticket_class, labels = c("1st", "2nd", "3rd")),
+    survived = factor(survived, labels = c("No", "Yes")),
+    gender = factor(gender, labels = c("Female", "Male")),
+    port_embarked = factor(port_embarked, labels = c("Cherbourg", "Queenstown", "Southampton"))
+  )
+```
+
+Tidy - Generate Features
+========================================================
+
+```{r}
+features <- c(
+  "ticket_class",
+  "survived",
+  "title",
+  "gender",
+  "age",
+  "family_size",
+  "ticket_fare",
+  "deck",
+  "port_embarked"
+)
+```
+
+```{r}
+titanic_tidy <- titanic %>%
+  mutate(
+    title = factor(str_extract(name, pattern = "[:alpha:]*\\.")),
+    deck = fct_explicit_na(factor(str_extract(cabin_number, pattern = "[:upper:]"))),
+    family_size = sibling_spouse + parent_child,
+    port_embarked = fct_explicit_na(port_embarked)
+  ) %>%
+  select(features) %>% 
+  drop_na()
+```
+
+Tidy - Split Data
+========================================================
+
+```{r}
+split <- initial_split(titanic_tidy, prop = 4 / 5, strata = "survived")
+titanic_train <- training(split)
+titanic_test <- testing(split)
+```
+
+Tidy - Write Data
+========================================================
+
+```{r}
+write_rds(titanic_train, path = here("data", "titanic_train.rds"))
+write_rds(titanic_test, path = here("data", "titanic_test.rds"))
+```
+
+Explore - Read Training Data
+========================================================
+
+```{r}
+titanic <- read_rds(here("data", "titanic_train.rds"))
+```
+
+Explore - Numerical Statistics
+========================================================
+
+```{r}
+skim(titanic)
+```
+
+Explore - Graphical Statistics
+========================================================
+
+```{r}
+ggplot(data = titanic) +
+  geom_bar(aes(x = survived, fill = ticket_class), position = "fill") +
+  labs(title = "Proportion of Ticket Class that Survived",
+       fill = "Ticket Class",
+       x = "Survived",
+       y = "Proportion")
+```
+
+Explore - Graphical Statistics
+========================================================
+
+```{r}
+ggplot(data = titanic) +
+  geom_bar(aes(x = fct_reorder(title, survived, function(x) mean(as.numeric(x))), fill = survived),
+    position = "fill"
+  ) +
+  coord_flip() +
+  labs(title = "Proportion of Titles that Survived",
+       fill = "Survived",
+       x = "Proportion",
+       y = "Title")
+```
+
+Model - Read Data
+========================================================
+
+```{r}
+titanic_train <- read_rds(here("data", "titanic_train.rds"))
+titanic_test <- read_rds(here("data", "titanic_test.rds"))
+```
+
+Model - Preprocess Data
+========================================================
+
+```{r}
+rec <- titanic_train %>%
+  recipe(survived ~ .) %>%
+  step_other(title, deck) %>% 
+  step_dummy(all_nominal(), -all_outcomes()) %>% 
+  prep(training = titanic_train)
+
+titanic_train <- bake(rec, new_data = titanic_train)
+titanic_test <- bake(rec, new_data = titanic_test)
+```
+
+Model - Specification
+========================================================
+
+```{r}
+model <- rand_forest(
+  mode = "classification",
+  mtry = tune(),
+  trees = tune(),
+  min_n = tune()
+) %>%
+  set_engine("ranger")
+```
+
+Model - Cross-validation
+========================================================
+
+```{r}
+folds <- vfold_cv(titanic_train, repeats = 5, strata = "survived")
+```
+
+Model - Candidate hyper-parameters
+========================================================
+
+```{r}
+candidates <- parameters(
+  mtry(c(1, 5)),
+  trees(c(500, 1000)),
+  min_n(c(1, 5))
+) %>% 
+  grid_max_entropy(size = 3)
+```
+
+Model - Hyper-parameter tuning
+========================================================
+
+```{r}
+fit <- tune_grid(survived ~ .,
+  model = model,
+  rs = folds,
+  grid = candidates,
+  perf = metric_set(f_meas)
+)
+
+estimate(fit) %>% 
+  filter(.metric == "f_meas") %>% 
+  arrange(desc(mean)) %>% 
+  slice(seq_len(5))
+```
+
+Model - Fitting
+========================================================
+
+```{r}
+model <- rand_forest(
+  mode = "classification",
+  mtry = 5,
+  trees = 645,
+  min_n = 2
+) %>%
+  set_engine("ranger") %>% 
+  fit(survived ~ ., data = titanic_train)
+```
+
+Model - Testing
+========================================================
+
+```{r}
+predict(model, new_data = titanic_test) %>%
+  bind_cols(titanic_test) %>%
+  metric_set(accuracy, f_meas)(truth = survived, estimate = .pred_class)
+```
